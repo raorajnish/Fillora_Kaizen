@@ -12,14 +12,11 @@ if (typeof window !== 'undefined' && !window.SpeechRecognition && window.webkitS
 
 function VoiceAgent({ user }) {
   const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [status, setStatus] = useState('idle');
-  const [message, setMessage] = useState('Click the mic to start');
-  const [formData, setFormData] = useState(null);
-  const [showFieldEditor, setShowFieldEditor] = useState(false);
-  const [editingMode, setEditingMode] = useState(null); // 'update' | 'create' | null
-  const [waitingForFieldInput, setWaitingForFieldInput] = useState(false);
-  const [chatHistory, setChatHistory] = useState([]);
+  const [textInput, setTextInput] = useState('');
+  const [chatMessages, setChatMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [scraping, setScraping] = useState(false);
+  const chatEndRef = useRef(null);
   const synthRef = useRef(null);
 
   const {
@@ -38,11 +35,10 @@ function VoiceAgent({ user }) {
     // Load chat history on mount
     loadChatHistory();
     
-    // Auto-start listening after login
+    // Welcome message
     if (user && browserSupportsSpeechRecognition) {
       setTimeout(() => {
-        speakMessage("Hello! I'm your voice assistant. How can I help you today?");
-        setMessage("Hello! I'm your voice assistant. How can I help you today?");
+        addMessage('assistant', "Hello! I'm your voice assistant. How can I help you today?");
       }, 500);
     }
   }, [user]);
@@ -50,32 +46,15 @@ function VoiceAgent({ user }) {
   useEffect(() => {
     if (listening) {
       setIsListening(true);
-      setStatus('listening');
     } else if (isListening && !listening) {
       setIsListening(false);
     }
   }, [listening, isListening]);
 
   useEffect(() => {
-    if (liveTranscript && !waitingForFieldInput) {
-      setTranscript(liveTranscript);
-      handleVoiceCommand(liveTranscript);
-    } else if (liveTranscript && waitingForFieldInput) {
-      setTranscript(liveTranscript);
-      handleFieldInput(liveTranscript);
-    }
-  }, [liveTranscript, waitingForFieldInput]);
-
-  const speakMessage = (text) => {
-    if (synthRef.current && text) {
-      synthRef.current.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      utterance.pitch = 1;
-      utterance.volume = 1;
-      synthRef.current.speak(utterance);
-    }
-  };
+    // Auto-scroll to bottom when new messages arrive
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const getAuthToken = async () => {
     return new Promise((resolve) => {
@@ -90,15 +69,33 @@ function VoiceAgent({ user }) {
       const token = await getAuthToken();
       const response = await axios.get(`${API_BASE_URL}/api/chat/`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { limit: 20 },
+        params: { limit: 50 },
       });
-      setChatHistory(response.data.history || []);
+      
+      if (response.data.history) {
+        const messages = response.data.history.map(chat => ({
+          role: chat.role,
+          message: chat.message,
+          timestamp: chat.created_at,
+        }));
+        setChatMessages(messages);
+      }
     } catch (error) {
       console.error('Error loading chat history:', error);
     }
   };
 
-  const saveToChatHistory = async (role, message, url = '') => {
+  const addMessage = (role, message) => {
+    const newMessage = {
+      role,
+      message,
+      timestamp: new Date().toISOString(),
+    };
+    setChatMessages(prev => [...prev, newMessage]);
+    return newMessage;
+  };
+
+  const saveChatMessage = async (role, message, url = '') => {
     try {
       const token = await getAuthToken();
       await axios.post(
@@ -106,180 +103,76 @@ function VoiceAgent({ user }) {
         { message, url },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setChatHistory((prev) => [...prev, { role, message }]);
     } catch (error) {
-      console.error('Error saving to chat history:', error);
+      console.error('Error saving chat message:', error);
     }
   };
 
-  const sendChatMessage = async (userMessage, url = '') => {
+  const sendMessage = async (messageText) => {
+    if (!messageText.trim()) return;
+
+    setLoading(true);
+    const userMessage = messageText.trim();
+    addMessage('user', userMessage);
+
     try {
-      const token = await getAuthToken();
-      const response = await axios.post(
-        `${API_BASE_URL}/api/chat/`,
-        { message: userMessage, url },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      const aiResponse = response.data.message;
-      speakMessage(aiResponse);
-      setMessage(aiResponse);
-      
-      setChatHistory((prev) => [
-        ...prev,
-        { role: 'user', message: userMessage },
-        { role: 'assistant', message: aiResponse },
-      ]);
-      
-      return aiResponse;
-    } catch (error) {
-      console.error('Error sending chat message:', error);
-      const errorMsg = 'Sorry, I encountered an error. Please try again.';
-      speakMessage(errorMsg);
-      setMessage(errorMsg);
-      return null;
-    }
-  };
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        const url = tabs[0]?.url || '';
+        await saveChatMessage('user', userMessage, url);
 
-  const parseFieldInput = (text) => {
-    // Parse natural language input like:
-    // "Update email to john@example.com"
-    // "Change name to John Doe"
-    // "Add phone number 1234567890"
-    // "Create field address with value 123 Main St"
-    
-    const lowerText = text.toLowerCase();
-    const words = text.split(/\s+/);
-    
-    // Try to extract field name and value
-    let fieldName = null;
-    let value = null;
-    let selector = null;
-    
-    // Patterns for update
-    if (lowerText.includes('update') || lowerText.includes('change') || lowerText.includes('modify')) {
-      const updateMatch = text.match(/(?:update|change|modify)\s+(\w+)\s+(?:to|with|as)\s+(.+)/i);
-      if (updateMatch) {
-        fieldName = updateMatch[1];
-        value = updateMatch[2].trim();
-      }
-    }
-    
-    // Patterns for create/add
-    if (lowerText.includes('create') || lowerText.includes('add') || lowerText.includes('new')) {
-      const createMatch = text.match(/(?:create|add|new)\s+(?:field\s+)?(\w+)(?:\s+with\s+value\s+|\s+as\s+|\s+to\s+)(.+)/i);
-      if (createMatch) {
-        fieldName = createMatch[1];
-        value = createMatch[2].trim();
-      }
-    }
-    
-    // Fallback: try to find field name and value
-    if (!fieldName || !value) {
-      // Look for common field names
-      const fieldPatterns = ['email', 'name', 'phone', 'address', 'city', 'state', 'zip', 'country', 'username', 'password'];
-      for (const pattern of fieldPatterns) {
-        if (lowerText.includes(pattern)) {
-          fieldName = pattern;
-          // Try to extract value after field name
-          const valueMatch = text.match(new RegExp(`${pattern}\\s+(?:is|to|with|as)\\s+(.+?)(?:\\s+and|\\s+$|$)`, 'i'));
-          if (valueMatch) {
-            value = valueMatch[1].trim();
-          } else {
-            // Try to get next few words as value
-            const fieldIndex = lowerText.indexOf(pattern);
-            const afterField = text.substring(fieldIndex + pattern.length).trim();
-            const valueWords = afterField.split(/\s+/).slice(0, 5).join(' ');
-            if (valueWords) value = valueWords;
-          }
-          break;
+        const token = await getAuthToken();
+        const response = await axios.post(
+          `${API_BASE_URL}/api/chat/`,
+          { message: userMessage, url },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (response.data.message) {
+          const aiMessage = response.data.message;
+          addMessage('assistant', aiMessage);
+          await saveChatMessage('assistant', aiMessage, url);
+          speakMessage(aiMessage);
         }
-      }
+
+        setLoading(false);
+      });
+    } catch (error) {
+      console.error('Error sending message:', error);
+      addMessage('assistant', 'Sorry, I encountered an error. Please try again.');
+      setLoading(false);
     }
-    
-    // Generate selector if we have field name
-    if (fieldName) {
-      selector = `[name="${fieldName}"], #${fieldName}, input[name*="${fieldName}" i]`;
-    }
-    
-    return { fieldName, value, selector };
   };
 
-  const handleFieldInput = async (text) => {
-    if (!formData || !editingMode) return;
-    
-    const parsed = parseFieldInput(text);
-    
-    if (!parsed.fieldName || !parsed.value) {
-      const errorMsg = "I couldn't understand that. Please say something like 'Update email to john@example.com' or 'Add phone number 1234567890'.";
-      speakMessage(errorMsg);
-      setMessage(errorMsg);
-      setWaitingForFieldInput(false);
+  useEffect(() => {
+    // When voice input stops and we have a transcript, send it
+    if (!listening && isListening && liveTranscript && liveTranscript.trim()) {
+      const transcript = liveTranscript.trim();
+      sendMessage(transcript);
       resetTranscript();
+    }
+  }, [listening, isListening, liveTranscript]);
+
+  const toggleListening = () => {
+    if (!browserSupportsSpeechRecognition) {
+      addMessage('assistant', 'Speech recognition not supported in this browser');
       return;
     }
-    
-    let updatedFields = [...(formData.fields || [])];
-    
-    if (editingMode === 'update') {
-      // Find and update existing field
-      const fieldIndex = updatedFields.findIndex(
-        (f) => f.name?.toLowerCase() === parsed.fieldName.toLowerCase()
-      );
-      
-      if (fieldIndex >= 0) {
-        updatedFields[fieldIndex] = {
-          ...updatedFields[fieldIndex],
-          value: parsed.value,
-          selector: parsed.selector || updatedFields[fieldIndex].selector,
-        };
-        const updateMsg = `Updated ${parsed.fieldName} to ${parsed.value}`;
-        speakMessage(updateMsg);
-        setMessage(updateMsg);
-        await saveToChatHistory('user', `Update ${parsed.fieldName} to ${parsed.value}`);
-        await saveToChatHistory('assistant', updateMsg);
-      } else {
-        const notFoundMsg = `Field ${parsed.fieldName} not found. Would you like to create it instead?`;
-        speakMessage(notFoundMsg);
-        setMessage(notFoundMsg);
-        setWaitingForFieldInput(false);
-        resetTranscript();
-        return;
-      }
-    } else if (editingMode === 'create') {
-      // Add new field
-      updatedFields.push({
-        name: parsed.fieldName,
-        selector: parsed.selector,
-        value: parsed.value,
-        type: 'text',
-      });
-      const createMsg = `Added new field ${parsed.fieldName} with value ${parsed.value}`;
-      speakMessage(createMsg);
-      setMessage(createMsg);
-      await saveToChatHistory('user', `Create field ${parsed.fieldName} with value ${parsed.value}`);
-      await saveToChatHistory('assistant', createMsg);
+
+    if (isListening) {
+      SpeechRecognition.stopListening();
+      setIsListening(false);
+      // The useEffect will handle sending the message when listening stops
+    } else {
+      SpeechRecognition.startListening({ continuous: true, interimResults: true });
+      setIsListening(true);
     }
-    
-    setFormData({ ...formData, fields: updatedFields });
-    setWaitingForFieldInput(false);
-    setEditingMode(null);
-    resetTranscript();
-    
-    // Ask if more changes needed
-    setTimeout(() => {
-      const continueMsg = 'Field updated. Would you like to make more changes, or fill the form?';
-      speakMessage(continueMsg);
-      setMessage(continueMsg);
-    }, 1000);
   };
 
-  const extractAndAnalyzePage = async () => {
+  const handleScrape = async () => {
+    setScraping(true);
+    addMessage('assistant', 'Scraping page and analyzing with AI...');
+
     try {
-      setStatus('processing');
-      setMessage('Scraping page and analyzing with AI...');
-      speakMessage('Scraping page and analyzing with AI...');
-      
       const token = await getAuthToken();
       
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
@@ -298,12 +191,12 @@ function VoiceAgent({ user }) {
           const pageData = result.result;
 
           // Prepare chat history for context
-          const historyForLLM = chatHistory.map((chat) => ({
-            role: chat.role,
-            message: chat.message,
+          const historyForLLM = chatMessages.map((msg) => ({
+            role: msg.role,
+            message: msg.message,
           }));
 
-          // Send to backend for LLM analysis
+          // Send to backend for LLM analysis (includes profile data)
           const response = await axios.post(
             `${API_BASE_URL}/api/analyze/`,
             {
@@ -317,59 +210,35 @@ function VoiceAgent({ user }) {
           );
 
           if (response.data.fields && response.data.fields.length > 0) {
-            setFormData({
-              ...response.data,
-              url: pageData.url,
-            });
-            setShowFieldEditor(true);
-            setStatus('editing');
+            const fieldsMsg = `Found ${response.data.fields.length} form fields:\n${response.data.fields.map(f => `- ${f.name}: ${f.value || 'N/A'}`).join('\n')}`;
+            addMessage('assistant', fieldsMsg);
+            await saveChatMessage('assistant', fieldsMsg, pageData.url);
             
-            const displayMsg = `Found ${response.data.fields.length} form fields. Here's what I found:`;
-            setMessage(displayMsg);
-            speakMessage(displayMsg);
-            
-            // Display fields after a moment
+            // Auto-fill the form
             setTimeout(() => {
-              const fieldsMsg = response.data.fields.map(f => `${f.name}: ${f.value}`).join(', ');
-              const optionsMsg = 'You can update a field, create a new field, or fill the form. What would you like to do?';
-              speakMessage(optionsMsg);
-              setMessage(optionsMsg);
-            }, 2000);
-            
-            // Save to chat history
-            await saveToChatHistory('assistant', displayMsg, pageData.url);
+              fillForm(response.data);
+            }, 1000);
           } else {
             const noFieldsMsg = 'No form fields detected on this page.';
-            setMessage(noFieldsMsg);
-            speakMessage(noFieldsMsg);
-            setStatus('idle');
-            resetTranscript();
+            addMessage('assistant', noFieldsMsg);
+            await saveChatMessage('assistant', noFieldsMsg, pageData.url);
           }
         } catch (error) {
-          console.error('Error analyzing page:', error);
-          const errorMsg = 'Error analyzing page. Please try again.';
-          setMessage(errorMsg);
-          speakMessage(errorMsg);
-          setStatus('idle');
-          resetTranscript();
+          console.error('Error scraping page:', error);
+          addMessage('assistant', 'Error scraping page. Please try again.');
+        } finally {
+          setScraping(false);
         }
       });
     } catch (error) {
       console.error('Error:', error);
-      const errorMsg = 'Error processing request. Please try again.';
-      setMessage(errorMsg);
-      speakMessage(errorMsg);
-      setStatus('idle');
-      resetTranscript();
+      addMessage('assistant', 'Error processing request. Please try again.');
+      setScraping(false);
     }
   };
 
   const fillForm = async (data) => {
-    setStatus('filling');
-    setMessage('Filling form...');
-    speakMessage('Filling form...');
-    setShowFieldEditor(false);
-    setEditingMode(null);
+    addMessage('assistant', 'Filling form...');
 
     try {
       const token = await getAuthToken();
@@ -422,136 +291,38 @@ function VoiceAgent({ user }) {
           }
         );
 
-        setStatus('done');
-        const successMsg = 'Form filled successfully! Do you need anything else?';
-        setMessage(successMsg);
-        speakMessage(successMsg);
-        
-        await saveToChatHistory('assistant', successMsg, data.url);
-        
-        // Reset after asking
-        setTimeout(() => {
-          setFormData(null);
-          setStatus('idle');
-          setMessage('Click the mic to start');
-          resetTranscript();
-        }, 3000);
+        const successMsg = 'Form filled successfully!';
+        addMessage('assistant', successMsg);
+        await saveChatMessage('assistant', successMsg, data.url);
       });
     } catch (error) {
       console.error('Error filling form:', error);
-      const errorMsg = 'Error filling form. Please try again.';
-      setMessage(errorMsg);
-      speakMessage(errorMsg);
-      setStatus('idle');
-      resetTranscript();
+      addMessage('assistant', 'Error filling form. Please try again.');
     }
   };
 
-  const handleUpdateField = () => {
-    setEditingMode('update');
-    setWaitingForFieldInput(true);
-    const promptMsg = 'Please speak the field name and new value. For example: "Update email to john@example.com"';
-    speakMessage(promptMsg);
-    setMessage(promptMsg);
-    resetTranscript();
-  };
-
-  const handleCreateField = () => {
-    setEditingMode('create');
-    setWaitingForFieldInput(true);
-    const promptMsg = 'Please speak the field name and value. For example: "Add phone number 1234567890"';
-    speakMessage(promptMsg);
-    setMessage(promptMsg);
-    resetTranscript();
-  };
-
-  const handleFillForm = () => {
-    if (formData) {
-      fillForm(formData);
+  const speakMessage = (text) => {
+    if (synthRef.current && text) {
+      synthRef.current.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.9;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      synthRef.current.speak(utterance);
     }
   };
 
-  const handleVoiceCommand = async (text) => {
-    const lowerText = text.toLowerCase().trim();
-
-    // If waiting for field input, don't process other commands
-    if (waitingForFieldInput) return;
-
-    // Check for page analysis/scraping commands
-    if (
-      lowerText.includes('analyze') ||
-      lowerText.includes('scrape') ||
-      (lowerText.includes('fill') && lowerText.includes('form'))
-    ) {
-      await extractAndAnalyzePage();
-    }
-    // Check for update field
-    else if ((lowerText.includes('update') || lowerText.includes('change') || lowerText.includes('modify')) && showFieldEditor) {
-      handleUpdateField();
-    }
-    // Check for create field
-    else if ((lowerText.includes('create') || lowerText.includes('add') || lowerText.includes('new field')) && showFieldEditor) {
-      handleCreateField();
-    }
-    // Check for fill form
-    else if ((lowerText.includes('fill form') || lowerText.includes('fill it') || lowerText.includes('proceed')) && showFieldEditor) {
-      handleFillForm();
-    }
-    // Check for logout
-    else if (lowerText.includes('logout') || lowerText.includes('sign out')) {
-      const logoutMsg = 'Logging out...';
-      setMessage(logoutMsg);
-      speakMessage(logoutMsg);
-      chrome.storage.local.remove(['authToken', 'user'], () => {
-        window.location.reload();
-      });
-    }
-    // Check for ending conversation
-    else if (lowerText.includes('no') && (lowerText.includes('else') || lowerText.includes('more'))) {
-      const goodbyeMsg = 'Great! Have a wonderful day!';
-      setMessage(goodbyeMsg);
-      speakMessage(goodbyeMsg);
-      setTimeout(() => {
-        setStatus('idle');
-        setMessage('Click the mic to start');
-        setFormData(null);
-        setShowFieldEditor(false);
-        resetTranscript();
-      }, 2000);
-    }
-    // General chat - send to LLM
-    else if (text.trim().length > 0 && !showFieldEditor) {
-      setStatus('processing');
-      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-        const url = tabs[0]?.url || '';
-        await sendChatMessage(text, url);
-        setStatus('idle');
-        resetTranscript();
-      });
+  const handleSend = () => {
+    if (textInput.trim()) {
+      sendMessage(textInput);
+      setTextInput('');
     }
   };
 
-  const toggleListening = () => {
-    if (!browserSupportsSpeechRecognition) {
-      setMessage('Speech recognition not supported in this browser');
-      return;
-    }
-
-    if (isListening) {
-      SpeechRecognition.stopListening();
-      setIsListening(false);
-      setStatus('idle');
-      setMessage('Click the mic to start');
-      resetTranscript();
-      if (synthRef.current) {
-        synthRef.current.cancel();
-      }
-    } else {
-      SpeechRecognition.startListening({ continuous: true, interimResults: true });
-      setIsListening(true);
-      setStatus('listening');
-      setMessage('Listening...');
-      resetTranscript();
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   };
 
@@ -568,93 +339,132 @@ function VoiceAgent({ user }) {
 
   return (
     <div className="voice-agent">
-      <div className="voice-container">
-        <div className={`mic-button ${isListening ? 'listening' : ''} ${status}`} onClick={toggleListening}>
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            {isListening ? (
+      {/* Chat Display Area */}
+      <div className="chat-display">
+        {chatMessages.length === 0 ? (
+          <div className="chat-empty">
+            <p>Start a conversation by typing or using voice</p>
+          </div>
+        ) : (
+          <div className="chat-messages">
+            {chatMessages.map((msg, idx) => (
+              <div key={idx} className={`chat-message ${msg.role}`}>
+                <div className="chat-message-content">
+                  {msg.role === 'user' ? (
+                    <div className="message-bubble user-bubble">
+                      {msg.message}
+                    </div>
+                  ) : (
+                    <div className="message-bubble assistant-bubble">
+                      {msg.message}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div className="chat-message assistant">
+                <div className="message-bubble assistant-bubble">
+                  <div className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {isListening && liveTranscript && (
+              <div className="chat-message user">
+                <div className="message-bubble user-bubble interim">
+                  {liveTranscript}
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Bottom Section */}
+      <div className="voice-agent-bottom">
+        {/* Action Buttons */}
+        <div className="action-buttons-row">
+          <button
+            className="btn-action btn-capture"
+            disabled
+            title="Capture (Coming soon)"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+            </svg>
+            Capture
+          </button>
+          <button
+            className="btn-action btn-scrape"
+            onClick={handleScrape}
+            disabled={scraping}
+          >
+            {scraping ? (
               <>
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
+                <div className="spinner-small"></div>
+                Scraping...
               </>
             ) : (
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+                Scrape
+              </>
             )}
-          </svg>
-          {isListening && <div className="pulse-ring"></div>}
+          </button>
         </div>
 
-        <div className="status-message">{message}</div>
-
-        {transcript && (
-          <div className="transcript-box">
-            <div className="transcript-label">You said:</div>
-            <div className="transcript-text">{transcript}</div>
-          </div>
-        )}
-
-        {showFieldEditor && formData && (
-          <div className="field-editor">
-            <div className="fields-display">
-              <h4>Detected Fields:</h4>
-              <div className="fields-list">
-                {formData.fields.map((field, idx) => (
-                  <div key={idx} className="field-item">
-                    <span className="field-name">{field.name || 'Unnamed'}:</span>
-                    <span className="field-value">{field.value || 'N/A'}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="action-buttons">
-              <button className="btn-action btn-update" onClick={handleUpdateField}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                </svg>
-                Update Field
-              </button>
-              <button className="btn-action btn-create" onClick={handleCreateField}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                Create New Field
-              </button>
-              <button className="btn-action btn-fill" onClick={handleFillForm}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" y1="3" x2="12" y2="15" />
-                </svg>
-                Fill Form
-              </button>
-            </div>
-
-            {waitingForFieldInput && (
-              <div className="waiting-input">
-                <p>🎤 Listening for field update...</p>
-                <p className="hint">Say something like: "Update email to john@example.com"</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {chatHistory.length > 0 && !showFieldEditor && (
-          <div className="chat-history-preview">
-            <div className="chat-history-label">Recent conversation:</div>
-            <div className="chat-history-items">
-              {chatHistory.slice(-3).map((chat, idx) => (
-                <div key={idx} className={`chat-item ${chat.role}`}>
-                  <span className="chat-role">{chat.role === 'user' ? 'You' : 'AI'}:</span>
-                  <span className="chat-message">{chat.message.substring(0, 50)}...</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Input Section */}
+        <div className="input-section">
+          <button
+            className={`mic-button-small ${isListening ? 'listening' : ''}`}
+            onClick={toggleListening}
+            title={isListening ? 'Stop listening' : 'Start voice input'}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              {isListening ? (
+                <>
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </>
+              ) : (
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              )}
+            </svg>
+          </button>
+          <input
+            type="text"
+            className="text-input"
+            placeholder="Ask me anything..."
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            onKeyPress={handleKeyPress}
+            disabled={loading}
+          />
+          <button
+            className="btn-send"
+            onClick={handleSend}
+            disabled={loading || !textInput.trim()}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   );

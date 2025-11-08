@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth import get_user_model
-from .models import FormSubmission, AIModel, ChatHistory
+from .models import FormSubmission, AIModel, ChatHistory, UserProfile
 
 User = get_user_model()
 
@@ -40,5 +40,14 @@ class FormSubmissionAdmin(admin.ModelAdmin):
     list_filter = ['created_at', 'website']
     search_fields = ['user__email', 'website', 'url']
     readonly_fields = ['created_at']
+    date_hierarchy = 'created_at'
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ['user', 'updated_at', 'created_at']
+    list_filter = ['created_at', 'updated_at']
+    search_fields = ['user__email']
+    readonly_fields = ['created_at', 'updated_at']
     date_hierarchy = 'created_at'
 

@@ -9,5 +9,6 @@ urlpatterns = [
     path('history/', views.history, name='history'),
     path('model/', views.model_settings, name='model_settings'),
     path('chat/', views.chat, name='chat'),
+    path('profile/', views.profile, name='profile'),
 ]
 

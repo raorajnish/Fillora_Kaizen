@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import VoiceAgent from './VoiceAgent';
 import History from './History';
 import Settings from './Settings';
+import Profile from './Profile';
 import './MainApp.css';
 
 function MainApp({ user, onLogout }) {
@@ -56,6 +57,16 @@ function MainApp({ user, onLogout }) {
           History
         </button>
         <button
+          className={`tab ${activeTab === 'profile' ? 'active' : ''}`}
+          onClick={() => setActiveTab('profile')}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          Profile
+        </button>
+        <button
           className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveTab('settings')}
         >
@@ -70,6 +81,7 @@ function MainApp({ user, onLogout }) {
       <div className="tab-content">
         {activeTab === 'voice' && <VoiceAgent user={user} />}
         {activeTab === 'history' && <History user={user} />}
+        {activeTab === 'profile' && <Profile user={user} />}
         {activeTab === 'settings' && <Settings user={user} />}
       </div>
     </div>

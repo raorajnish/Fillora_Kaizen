@@ -69,13 +69,10 @@ def analyze_with_llm(html, chat_history, user_data, model_name='gemini'):
         for msg in chat_history[-10:]  # Last 10 messages
     ])
     
-    # Prepare user data context
-    user_context = f"""
-User Information:
-- Name: {user_data.get('name', 'N/A')}
-- Email: {user_data.get('email', 'N/A')}
-- Username: {user_data.get('username', 'N/A')}
-"""
+    # Prepare user data context (includes all profile fields)
+    user_context = "User Information:\n"
+    for key, value in user_data.items():
+        user_context += f"- {key.replace('_', ' ').title()}: {value}\n"
     
     # Create prompt for LLM
     prompt = f"""You are an intelligent form filling assistant. Analyze the HTML page and chat history to provide form filling instructions.

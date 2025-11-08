@@ -55,6 +55,21 @@ class ChatHistory(models.Model):
         return f"{self.user.email} - {self.role} - {self.created_at}"
 
 
+class UserProfile(models.Model):
+    """Model to store custom user profile data (key-value pairs)"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile_data')
+    data = models.JSONField(default=dict)  # Store custom fields as {field_name: field_value}
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'User Profile'
+        verbose_name_plural = 'User Profiles'
+
+    def __str__(self):
+        return f"{self.user.email} - Profile Data"
+
+
 class FormSubmission(models.Model):
     """Model to store form filling history"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='form_submissions')

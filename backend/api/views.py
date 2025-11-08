@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from django.conf import settings
-from .models import FormSubmission, AIModel, ChatHistory
+from .models import FormSubmission, AIModel, ChatHistory, UserProfile
 from .serializers import UserSerializer, FormSubmissionSerializer, AIModelSerializer, ChatHistorySerializer
 from .utils import generate_jwt_token, analyze_page_html, analyze_with_llm, get_ai_model_key, call_gemini_api, call_groq_api
 import json
@@ -162,8 +162,15 @@ def analyze_with_ai(request):
         'username': request.user.username,
     }
     
+    # Get user profile data (custom fields)
     try:
-        # Analyze with LLM
+        profile = UserProfile.objects.get(user=request.user)
+        user_data.update(profile.data)  # Merge custom profile fields
+    except UserProfile.DoesNotExist:
+        pass  # No custom profile data
+    
+    try:
+        # Analyze with LLM (includes profile data)
         result = analyze_with_llm(html, chat_history, user_data, model_name)
         
         # Save assistant message to chat history
@@ -273,6 +280,39 @@ def model_settings(request):
         })
 
 
+@api_view(['GET', 'POST', 'PUT'])
+@permission_classes([IsAuthenticated])
+def profile(request):
+    """Get or update user profile data (custom fields)"""
+    if request.method == 'GET':
+        # Get user profile
+        try:
+            profile = UserProfile.objects.get(user=request.user)
+            return Response({
+                'data': profile.data,
+                'updated_at': profile.updated_at,
+            })
+        except UserProfile.DoesNotExist:
+            return Response({'data': {}, 'updated_at': None})
+    
+    elif request.method == 'POST' or request.method == 'PUT':
+        # Update or create user profile
+        data = request.data.get('data', {})
+        
+        if not isinstance(data, dict):
+            return Response({'error': 'Data must be a dictionary'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        profile, created = UserProfile.objects.get_or_create(user=request.user)
+        profile.data = data
+        profile.save()
+        
+        return Response({
+            'message': 'Profile updated successfully',
+            'data': profile.data,
+            'updated_at': profile.updated_at,
+        })
+
+
 @api_view(['POST', 'GET'])
 @permission_classes([IsAuthenticated])
 def chat(request):
@@ -310,13 +350,23 @@ def chat(request):
             return Response({'error': f'API key not configured for {model_name}'}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+        # Get user profile data (custom fields)
+        user_data = {
+            'email': request.user.email,
+            'name': f"{request.user.first_name} {request.user.last_name}".strip() or request.user.email,
+            'username': request.user.username,
+        }
+        
+        try:
+            profile = UserProfile.objects.get(user=request.user)
+            user_data.update(profile.data)  # Merge custom profile fields
+        except UserProfile.DoesNotExist:
+            pass  # No custom profile data
+        
         # Prepare prompt for general chat
-        user_context = f"""
-User Information:
-- Name: {request.user.first_name} {request.user.last_name}
-- Email: {request.user.email}
-- Username: {request.user.username}
-"""
+        user_context = "User Information:\n"
+        for key, value in user_data.items():
+            user_context += f"- {key.replace('_', ' ').title()}: {value}\n"
         
         prompt = f"""You are a helpful AI assistant for a form filling Chrome extension. 
 You help users fill forms intelligently and answer questions about form filling.
