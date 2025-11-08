@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Fillora - Voice-Powered Form Filling",
+  "version": "1.0.0",
+  "description": "AI-powered voice agent for intelligent form filling with Google login",
+  "permissions": ["activeTab", "scripting", "storage", "identity"],
+  "host_permissions": ["http://localhost:8000/*", "https://*/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "action": {
+    "default_popup": "dist/popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["dist/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

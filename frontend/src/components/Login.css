@@ -1,0 +1,114 @@
+.login-container {
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 500px;
+  background: var(--bg-dark);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.logo {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-blue-light));
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.3);
+}
+
+.logo svg {
+  width: 36px;
+  height: 36px;
+}
+
+.login-header h1 {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-blue-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.login-content {
+  width: 100%;
+  max-width: 300px;
+  position: relative;
+}
+
+.error-message {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--error);
+  color: var(--error);
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.google-login-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  z-index: 10;
+}
+
+.loading-overlay .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+.loading-overlay p {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.login-footer {
+  margin-top: auto;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+

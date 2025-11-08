@@ -1,0 +1,116 @@
+.main-app {
+  width: 100%;
+  min-height: 500px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-dark);
+}
+
+.app-header {
+  padding: 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-blue-light));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  color: white;
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.user-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.user-email {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.logout-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.logout-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.tabs {
+  display: flex;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  flex: 1;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.tab.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+  background: var(--bg-dark);
+}
+
+.tab svg {
+  width: 18px;
+  height: 18px;
+}
+
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
